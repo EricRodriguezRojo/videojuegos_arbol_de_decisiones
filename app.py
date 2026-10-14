@@ -42,6 +42,8 @@ def main() -> None:
                 label = column.replace("_", " ")
                 if column in numeric_columns:
                     values[column] = st.number_input(label, value=0.0, format="%.2f")
+                elif column == "Name":
+                    values[column] = st.text_input(label, value="Nuevo videojuego")
                 else:
                     options = categorical_values.get(column, ["N/A"])
                     values[column] = st.selectbox(label, options)
