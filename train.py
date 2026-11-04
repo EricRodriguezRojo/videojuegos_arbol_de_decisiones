@@ -8,16 +8,26 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 
 RANDOM_STATE = 42
 DEFAULT_DATASET_PATH = Path("data/videojuegos.csv")
 DEFAULT_MODEL_PATH = Path("modelo.joblib")
 TARGET = "Genre"
+FEATURE_COLUMNS = [
+    "Name",
+    "Global_Sales",
+    "Average_Score",
+    "Year_of_Release",
+    "Publisher",
+    "Developer",
+    "Rating",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,7 +58,8 @@ def main() -> None:
         raise FileNotFoundError(f"No existe el CSV: {args.dataset_path}")
 
     data = pd.read_csv(args.dataset_path).dropna(subset=[TARGET]).copy()
-    X = data.drop(columns=[TARGET])
+    data["Average_Score"] = data[["Critic_Score", "User_Score"]].mean(axis=1)
+    X = data[FEATURE_COLUMNS]
     y = data[TARGET].astype(str)
     preprocessor, numeric_columns, categorical_columns = build_preprocessor(X)
     X_train, X_test, y_train, y_test = train_test_split(
@@ -73,13 +84,63 @@ def main() -> None:
     decision_tree.fit(X_train, y_train)
     print("Entrenando random forest...")
     random_forest.fit(X_train, y_train)
+    print("Entrenando MLP base...")
+    mlp_base = Pipeline([
+        ("preprocessor", build_preprocessor(X)[0]),
+        ("classifier", MLPClassifier(
+            hidden_layer_sizes=(128, 64),
+            activation="relu",
+            solver="adam",
+            alpha=1e-4,
+            learning_rate_init=1e-3,
+            max_iter=80,
+            early_stopping=True,
+            random_state=RANDOM_STATE,
+        )),
+    ])
+    mlp_base.fit(X_train, y_train)
+
+    print("Entrenando MLP adaptada (clases balanceadas y regularizacion)...")
+    adapted_preprocessor, _, _ = build_preprocessor(X)
+    adapted_preprocessor.transformers[0] = (
+        "numeric",
+        Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+        ]),
+        adapted_preprocessor.transformers[0][2],
+    )
+    mlp_adapted = Pipeline([
+        ("preprocessor", adapted_preprocessor),
+        ("classifier", MLPClassifier(
+            hidden_layer_sizes=(128, 64),
+            activation="relu",
+            solver="adam",
+            alpha=5e-4,
+            learning_rate_init=8e-4,
+            max_iter=100,
+            early_stopping=True,
+            random_state=RANDOM_STATE,
+        )),
+    ])
+    class_counts = y_train.value_counts()
+    sample_weights = y_train.map(lambda label: len(y_train) / (len(class_counts) * class_counts[label]))
+    mlp_adapted.fit(X_train, y_train, classifier__sample_weight=sample_weights.to_numpy())
 
     dt_predictions = decision_tree.predict(X_test)
     rf_predictions = random_forest.predict(X_test)
+    mlp_base_predictions = mlp_base.predict(X_test)
+    mlp_adapted_predictions = mlp_adapted.predict(X_test)
     dt_accuracy = accuracy_score(y_test, dt_predictions)
     rf_accuracy = accuracy_score(y_test, rf_predictions)
+    mlp_base_accuracy = accuracy_score(y_test, mlp_base_predictions)
+    mlp_adapted_accuracy = accuracy_score(y_test, mlp_adapted_predictions)
+    mlp_base_macro_f1 = f1_score(y_test, mlp_base_predictions, average="macro")
+    mlp_adapted_macro_f1 = f1_score(y_test, mlp_adapted_predictions, average="macro")
     print(f"Accuracy arbol: {dt_accuracy:.4f}")
     print(f"Accuracy random forest: {rf_accuracy:.4f}")
+    print(f"MLP base - accuracy: {mlp_base_accuracy:.4f} | macro F1: {mlp_base_macro_f1:.4f}")
+    print(f"MLP adaptada - accuracy: {mlp_adapted_accuracy:.4f} | macro F1: {mlp_adapted_macro_f1:.4f}")
     print("\nReporte de clasificacion (Random Forest):")
     print(classification_report(y_test, rf_predictions, zero_division=0))
 
@@ -99,9 +160,19 @@ def main() -> None:
         "metrics": {
             "decision_tree_accuracy": float(dt_accuracy),
             "random_forest_accuracy": float(rf_accuracy),
+            "mlp_base_accuracy": float(mlp_base_accuracy),
+            "mlp_base_macro_f1": float(mlp_base_macro_f1),
+            "mlp_adapted_accuracy": float(mlp_adapted_accuracy),
+            "mlp_adapted_macro_f1": float(mlp_adapted_macro_f1),
         },
     }
-    artifact = {"decision_tree": decision_tree, "random_forest": random_forest, "metadata": metadata}
+    artifact = {
+        "decision_tree": decision_tree,
+        "random_forest": random_forest,
+        "mlp_base": mlp_base,
+        "mlp_adapted": mlp_adapted,
+        "metadata": metadata,
+    }
     args.model_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(artifact, args.model_path, compress=3)
     print(f"\nModelo guardado en: {args.model_path.resolve()}")

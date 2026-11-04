@@ -111,14 +111,42 @@ Esto generará/actualizará `modelo.joblib`.
 Abrir `http://localhost:8501`.
 
 La app permite:
-- Dibujar un número en un lienzo
-- Subir una imagen
-- Elegir modelo: Árbol, Bosque o comparación
-- Ver voto mayoritario y probabilidades del Random Forest
+- Introducir las características de un videojuego
+- Elegir una MLP base, una MLP adaptada o los modelos clásicos
+- Comparar las predicciones y sus probabilidades
+
+## 7) Actividad de redes neuronales con videojuegos
+
+El entrenamiento compara dos redes MLP usando la misma partición del CSV:
+
+- **MLP base**: red densa con `ReLU`, optimizador `Adam` y pérdida estándar.
+- **MLP adaptada**: añade escalado de variables numéricas, regularización y
+  pesos inversamente proporcionales al tamaño de cada género para tratar el
+  desbalance.
+
+Se muestran `accuracy` y `macro_f1`. La métrica principal es `macro_f1`,
+porque da el mismo peso a cada género, incluso a los minoritarios.
+
+Para clasificar un videojuego solo se solicitan siete datos: nombre, ventas
+globales, media de `Critic_Score` y `User_Score`, año de lanzamiento, publisher,
+developer y rating. La media de puntuación se calcula automáticamente durante
+el entrenamiento.
+
+Para repetir la actividad:
+
+```powershell
+python train.py
+.venv\Scripts\python.exe -m streamlit run app.py
+```
+
+En la barra lateral se puede seleccionar `MLP base`, `MLP adaptada` o
+`Comparar MLP`. En una ejecución de referencia, la MLP adaptada obtuvo
+`0.735` de accuracy y `0.673` de macro F1, frente a `0.687` y `0.607` de la
+MLP base.
 
 ---
 
-## 7) Troubleshooting rápido
+## 8) Troubleshooting rápido
 
 Si ves este error:
 
